@@ -1,0 +1,100 @@
+name: Ubuntu VPS (SSH + OpenSSH + Tailscale)
+
+on:
+  workflow_dispatch:
+    inputs:
+      os:
+        description: "Select Ubuntu OS"
+        required: true
+        default: "ubuntu-22.04"
+        type: choice
+        options:
+          - ubuntu-20.04
+          - ubuntu-22.04
+
+      disk:
+        description: "Boot Disk Description (label only)"
+        required: false
+        default: "Standard Disk"
+
+      version:
+        description: "Ubuntu Version Label"
+        required: false
+        default: "Ubuntu Server"
+
+      tailscale_key:
+        description: "Enter your Tailscale Auth Key"
+        required: true
+
+jobs:
+  vps:
+    runs-on: ${{ inputs.os }}
+
+    steps:
+      - name: Generate Username & Password
+        run: |
+          USER="user$RANDOM"
+          PASS=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 20)
+
+          echo "USERNAME=$USER" >> $GITHUB_ENV
+          echo "PASSWORD=$PASS" >> $GITHUB_ENV
+
+      - name: Show Configuration
+        run: |
+          echo "=========================="
+          echo "OS: ${{ inputs.os }}"
+          echo "Boot Disk: ${{ inputs.disk }}"
+          echo "Version: ${{ inputs.version }}"
+          echo "=========================="
+
+      - name: Install OpenSSH Server
+        run: |
+          sudo apt update
+          sudo apt install -y openssh-server
+
+      - name: Setup User + Sudo + SSH
+        run: |
+          sudo useradd -m -s /bin/bash $USERNAME || true
+          echo "$USERNAME:$PASSWORD" | sudo chpasswd
+          sudo usermod -aG sudo $USERNAME
+
+          sudo sed -i 's/^#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config
+          sudo sed -i 's/^PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config
+
+          sudo systemctl enable ssh || true
+          sudo systemctl restart ssh || sudo service ssh restart
+
+      - name: Install Tailscale
+        run: |
+          curl -fsSL https://tailscale.com/install.sh | sh
+
+      - name: Start Tailscale
+        run: |
+          sudo tailscale up --authkey=${{ inputs.tailscale_key }} --hostname=github-vps
+
+      - name: Get Tailscale IP
+        run: |
+          TSIP=$(tailscale ip -4)
+          echo "TSIP=$TSIP" >> $GITHUB_ENV
+
+      - name: Show SSH Access Info
+        run: |
+          echo "=========================="
+          echo "🔐 SSH VPS IS RUNNING"
+          echo "IP: $TSIP"
+          echo "PORT: 22"
+          echo "USERNAME: $USERNAME"
+          echo "PASSWORD: $PASSWORD"
+          echo "SUDO: ENABLED"
+          echo "SSH: OpenSSH Installed"
+          echo "=========================="
+          echo "🛑 Stop workflow to shutdown VPS"
+          echo "=========================="
+
+      - name: Download Keep Alive Script
+        run: |
+          wget -O loop.js https://raw.githubusercontent.com/bxbzzbbbm-cmyk/friendly-system/refs/heads/main/loop.js
+
+      - name: Start Keep Alive
+        run: |
+          node loop.js
